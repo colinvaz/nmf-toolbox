@@ -217,7 +217,7 @@ for iter = 1 : config.maxiter
             cost(iter) = (-1 / (config.alpha * config.beta)) * sum(sum(V.^config.alpha .* V_hat.^config.beta - (config.alpha * V.^(config.alpha + config.beta) + config.beta *  V_hat.^(config.alpha + config.beta) + config.beta) / (config.alpha + config.beta)));
     end
     for i = 1 : num_sources
-        cost(iter) = cost(iter) + config.H_sparsity{i} * sum(sum(abs(H{i})));
+        cost(iter) = cost(iter) + config.W_sparsity{i} * sum(sum(abs(W{i}))) + config.H_sparsity{i} * sum(sum(abs(H{i})));
     end
     
     % Stop iterations if change in cost function less than the tolerance

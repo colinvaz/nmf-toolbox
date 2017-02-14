@@ -191,13 +191,13 @@ end
 W = config.W_init;
 H = config.H_init;
 for i = 1 : num_sources
-%     for t = 1 : num_frames
-%         W{i}(:, :, t) = W{i}(:, :, t) * diag(1 ./ sqrt(sum(W{i}(:, :, t).^2, 1)));
-%     end
-    for k = 1 : num_basis_elems{i}
-        W_curr = permute(W{i}(:, k, :), [1 3 2]);
-        W{i}(:, k, :) = permute(diag(1 ./ sqrt(sum(W_curr.^2, 2))) * W_curr, [1 3 2]);
+    for t = 1 : num_frames
+        W{i}(:, :, t) = W{i}(:, :, t) * diag(1 ./ sqrt(sum(W{i}(:, :, t).^2, 1)));
     end
+%     for k = 1 : num_basis_elems{i}
+%         W_curr = permute(W{i}(:, k, :), [1 3 2]);
+%         W{i}(:, k, :) = permute(diag(1 ./ sqrt(sum(W_curr.^2, 2))) * W_curr, [1 3 2]);
+%     end
 end
 
 W_all = cell2mat(W);
@@ -218,12 +218,8 @@ for iter = 1 : config.maxiter
                 case 'euclidean'
                     for t = 1 : num_frames
                         H_shifted = [zeros(num_basis_elems{i}, t-1) H{i}(:, 1:n-t+1)];
-%                         gradient_neg(:, :, t) = V * H_shifted' + W0(:, :, t) * diag(diag(H_shifted * V_hat' * W0(:, :, t)));
-%                         gradient_pos(:, :, t) = V_hat * H_shifted' + W0(:, :, t) * diag(diag(H_shifted * V' * W0(:, :, t)));
-                        gradient_neg(:, :, t) = V * H_shifted' + W0(:, :, t);
-                        gradient_pos(:, :, t) = V_hat * H_shifted';
-                        W{i}(:, :, t) = W0(:, :, t) .* (gradient_neg(:, :, t) ./ max(gradient_pos(:, :, t) + config.W_sparsity{i}, eps));
-                        V_hat = max(V_hat + (W{i}(:, :, t) - W0(:, :, t)) * H_shifted, 0);
+                        gradient_neg(:, :, t) = V * H_shifted' + W0(:, :, t) * diag(diag(H_shifted * V_hat' * W0(:, :, t)));
+                        gradient_pos(:, :, t) = V_hat * H_shifted' + W0(:, :, t) * diag(diag(H_shifted * V' * W0(:, :, t)));
                     end
                 case {'kl_divergence', 'kl'}
                     for t = 1 : num_frames
@@ -256,13 +252,13 @@ for iter = 1 : config.maxiter
             end
             for t = 1 : num_frames
                 W{i}(:, :, t) = W0(:, :, t) .* (gradient_neg(:, :, t) ./ max(gradient_pos(:, :, t) + config.W_sparsity{i}, eps));
-%                 W{i}(:, :, t) = W{i}(:, :, t) * diag(1 ./ sqrt(sum(W{i}(:, :, t).^2, 1)));
-%                 V_hat = max(V_hat + (W{i}(:, :, t) - W0(:, :, t)) * H_shifted, 0);
+                W{i}(:, :, t) = W{i}(:, :, t) * diag(1 ./ sqrt(sum(W{i}(:, :, t).^2, 1)));
+                V_hat = max(V_hat + (W{i}(:, :, t) - W0(:, :, t)) * H_shifted, 0);
             end
-            for k = 1 : num_basis_elems{i}
-                W_curr = permute(W{i}(:, k, :), [1 3 2]);
-                W{i}(:, k, :) = permute(diag(1 ./ sqrt(sum(W_curr.^2, 2))) * W_curr, [1 3 2]);
-            end
+%             for k = 1 : num_basis_elems{i}
+%                 W_curr = permute(W{i}(:, k, :), [1 3 2]);
+%                 W{i}(:, k, :) = permute(diag(1 ./ sqrt(sum(W_curr.^2, 2))) * W_curr, [1 3 2]);
+%             end
         end
     end
     W_all = cell2mat(W);

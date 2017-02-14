@@ -17,7 +17,7 @@ function ViewDictionary(W, config)
 %           not. The log-scale usually helps with visualization.
 %       config.flipud: [boolean] (default: false)
 %           indicate whether to flip the y-axis when plotting.
-%       config.threshold: [scalar] (default: 0)
+%       config.threshold: [scalar] (default: -inf)
 %           values below threshold are set to zero. Helps with removing
 %           "noisy" parts and viewing the high-energy components.
 %       config.sort: [boolean] (default: false)
@@ -42,8 +42,8 @@ end
 if ~isfield(config, 'flipud')
     config.flipud = false;
 end
-if ~isfield(config, 'threshold') || config.threshold < 0
-    config.threshold = 0;
+if ~isfield(config, 'threshold')
+    config.threshold = -inf;
 end
 if ~isfield(config, 'sort')
     config.sort = false;
@@ -67,9 +67,9 @@ elseif ndims(W) == 3  % CNMF
     [m, K, T] = size(W);
     
     if config.logscale
-        W_display = log10(reshape(permute(cat(3, max(W, config.threshold), zeros(m, K, config.spacing)), [1 3 2]), m, K*(T+config.spacing)));
+        W_display = reshape(permute(cat(3, max(log10(W), config.threshold), -inf(m, K, config.spacing)), [1 3 2]), m, K*(T+config.spacing));
     else
-        W_display = reshape(permute(cat(3, max(W, config.threshold), zeros(m, K, config.spacing)), [1 3 2]), m, K*(T+config.spacing));
+        W_display = reshape(permute(cat(3, max(W, config.threshold), -inf(m, K, config.spacing)), [1 3 2]), m, K*(T+config.spacing));
     end
 end
 
@@ -88,3 +88,5 @@ if ndims(W) == 3
     end
     set(gca, 'XTickLabel', labels);
 end
+
+end  % function
