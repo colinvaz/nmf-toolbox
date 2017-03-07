@@ -1,4 +1,4 @@
-function [W, H, S, G, cost] = chcnmf(V, num_basis_elems, num_frames, config)
+function [W, H, S, G, cost] = chcnmf(V, num_basis_elems, context_len, config)
 % chcnmf Decompose a matrix V into SGH using Convex hull-CNMF [1] by
 % minimizing the Euclidean distance between V and SGH. W = SG is a basis
 % matrix, where the columns of G form convex combinations of S, which
@@ -19,8 +19,9 @@ function [W, H, S, G, cost] = chcnmf(V, num_basis_elems, num_frames, config)
 %                  time --->
 %   num_basis_elems: [positive scalar]
 %       number of basis elements (columns of G/rows of H) for 1 source.
-%   num_frames: [positive scalar]
-%       number of context frames.
+%   context_len: [positive scalar]
+%       number of context frames to use when learning the factorization.
+%       1 = CH-NMF
 %   config: [structure] (optional)
 %       structure containing configuration parameters.
 %       config.S_init: [matrix] (default: matrix returned by Matlab's
@@ -29,7 +30,7 @@ function [W, H, S, G, cost] = chcnmf(V, num_basis_elems, num_frames, config)
 %           convex hull of V. 
 %       config.G_init: [non-negative 3D tensor] (default: random tensor)
 %           initialize time-varying convex combination matrix with a
-%           p-by-num_basis_elems-by-num_frames tensor.
+%           p-by-num_basis_elems-by-context_len tensor.
 %       config.H_init: [non-negative matrix] (default: n indicator vectors
 %           of cluster membership using K-means + 0.2)
 %           initialize encoding matrix with a num_basis_elems-by-n
@@ -52,13 +53,13 @@ function [W, H, S, G, cost] = chcnmf(V, num_basis_elems, num_frames, config)
 %
 % Outputs:
 %   W: [3D tensor]
-%       m-by-num_basis_elems-by-num_frames basis tensor. W = S*G.
+%       m-by-num_basis_elems-by-context_len basis tensor. W = S*G.
 %   H: [non-negative matrix]
 %       num_basis_elems-by-n non-negative encoding matrix.
 %   S: [matrix]
 %       m-by-p matrix of p points belonging to the convex hull of V.
 %   G: [non-negative 3D tensor]
-%       p-by-num_basis_elems-by-num_frames tensor of time-varying convex
+%       p-by-num_basis_elems-by-context_len tensor of time-varying convex
 %       combinations of the columns of S.
 %   cost: [vector]
 %       value of the cost function after each iteration.
@@ -110,12 +111,12 @@ num_points = size(S, 2);
 
 % Initialize convex combination tensor
 if ~isfield(config, 'G_init') || isempty(config.G_init)
-    config.G_init = rand(num_points, num_basis_elems, num_frames);
-%     for t = 2 : num_frames
+    config.G_init = rand(num_points, num_basis_elems, context_len);
+%     for t = 2 : context_len
 %         config.G_init(:, :, t) = abs(config.G_init(:, :, t-1) + 0.1 * (2*rand(num_points, num_basis_elems) - 1));
 %     end
-    norms = zeros(num_basis_elems, num_frames);
-    for t = 1 : num_frames
+    norms = zeros(num_basis_elems, context_len);
+    for t = 1 : context_len
         norms(:, t) = sum(config.G_init(:, :, t), 1)';
         config.G_init(:, :, t) = config.G_init(:, :, t) * diag(1 ./ sum(config.G_init(:, :, t)));
     end
@@ -132,7 +133,7 @@ if ~isfield(config, 'G_sparsity') || isempty(config.G_sparsity)
     config.G_sparsity = 0;
 % elseif config.G_sparsity > 0  % Hoyer's sparsity constraint
 %     L2s = 1 / (sqrt(m) - (sqrt(m) - 1) * config.G_sparsity);
-%     for t = 1 : num_frames
+%     for t = 1 : context_len
 %         for k = 1 : num_basis_elems
 %             G(:, k, t) = projfunc(G(:, k, t), 1, L2s, 1);
 %         end
@@ -186,8 +187,8 @@ S_V_neg = 0.5 * (abs(S' * V) - (S' * V));
 S_S_pos = 0.5 * (abs(S' * S) + (S' * S));
 S_S_neg = 0.5 * (abs(S' * S) - (S' * S));
 identity_mat = eye(n);
-W = zeros(m, num_basis_elems, num_frames);
-for t = 1 : num_frames
+W = zeros(m, num_basis_elems, context_len);
+for t = 1 : context_len
     W(:, :, t) = S * G(:, :, t);
 end
 
@@ -195,19 +196,16 @@ cost = zeros(config.maxiter+1, 1);
 V_hat = ReconstructFromDecomposition(W, H);
 cost(1) = 0.5 * sum(sum((V - V_hat).^2));
 
-stepsizeG = ones(num_frames, 1);
+stepsizeG = ones(context_len, 1);
 stepsizeH = 1;
 
 for iter = 1 : config.maxiter
-    F = zeros(num_points, n);
-    for t = 1 : num_frames
-        F = F + G0(:, :, t) * [zeros(num_basis_elems, t-1) H(:, 1:n-t+1)];
-    end
+    F = ReconstructFromDecomposition(G0, H);
         
     % Update convex combination tensor
     if ~config.G_fixed
-        norms = zeros(num_basis_elems, num_frames);
-        for t = 1 : num_frames
+        norms = zeros(num_basis_elems, context_len);
+        for t = 1 : context_len
             H_shifted = [zeros(num_basis_elems, t-1) H(:, 1:n-t+1)];
             
             % Hoyer's sparsity constraint
@@ -257,18 +255,15 @@ for iter = 1 : config.maxiter
             F = max(F + (G(:, :, t) - G0(:, :, t)) * H_shifted, 0);
             W(:, :, t) = S * G(:, :, t);
         end
-%         H = num_frames * diag(1 ./ sum((1 ./ norms), 2)) * H;
+%         H = context_len * diag(1 ./ sum((1 ./ norms), 2)) * H;
     end
 
     % Update encoding matrix
     if ~config.H_fixed
-        F = zeros(num_points, n);
-        for t = 1 : num_frames
-            F = F + G(:, :, t) * [zeros(num_basis_elems, t-1) H(:, 1:n-t+1)];
-        end
+        F = ReconstructFromDecomposition(G, H);
         negative_grad = zeros(num_basis_elems, n);
         positive_grad = zeros(num_basis_elems, n);
-        for t = 1 : num_frames
+        for t = 1 : context_len
             identity_shifted = [identity_mat(:, t:n) zeros(n, t-1)];
             F_shifted = [F(:, t:n) zeros(num_points, t-1)];
             negative_grad = negative_grad + G(:, :, t)' * (S_V_pos * identity_shifted + S_S_neg * F_shifted);

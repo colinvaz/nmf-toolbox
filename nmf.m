@@ -187,7 +187,7 @@ for iter = 1 : config.maxiter
                     positive_grad = W{i}' * ones(m, n);
                 case {'is_divergence', 'is'}
                     negative_grad = W{i}' * (V ./ V_hat.^2);
-                    positive_grad = W{i}' * (ones(m, n) ./ (W{i} * H0));
+                    positive_grad = W{i}' * (ones(m, n) ./ (W{i} * H{i}));
                 case {'ab_divergence', 'ab'}
                     if use_dual
                         negative_grad = (W{i}' * (V.^(config.alpha - 1) .* V_hat.^config.beta)).^(1 / config.beta);

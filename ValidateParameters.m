@@ -1,4 +1,4 @@
-function [config_out, is_W_cell, is_H_cell] = ValidateParameters(algorithm, config_in, V, num_basis_elems, num_frames)
+function [config_out, is_W_cell, is_H_cell] = ValidateParameters(algorithm, config_in, V, num_basis_elems, context_len)
 % ValidateParameters Validate NMF parameters.
 %
 % NMF Toolbox
@@ -81,8 +81,8 @@ if ~isfield(config_out, 'W_init') || isempty(config_out.W_init)  % not given any
             end
         case {'cnmf', 'ccmfwisa'}
             for i = 1 : num_sources
-                config_out.W_init{i} = rand(m, num_basis_elems{i}, num_frames);
-                for t = 1 : num_frames
+                config_out.W_init{i} = rand(m, num_basis_elems{i}, context_len);
+                for t = 1 : context_len
                     config_out.W_init{i}(:, :, t) = config_out.W_init{i}(:, :, t) * diag(1 ./ sqrt(sum(config_out.W_init{i}(:, :, t).^2, 1)));
                 end
             end
@@ -93,8 +93,8 @@ if ~isfield(config_out, 'W_init') || isempty(config_out.W_init)  % not given any
             end
         case 'ccmf'
             for i = 1 : num_sources
-                config_out.W_init{i} = (2 * rand(m, num_basis_elems{i}, num_frames) - 1) + 1j*(2 * rand(m, num_basis_elems{i}, num_frames) - 1);
-                for t = 1 : num_frames
+                config_out.W_init{i} = (2 * rand(m, num_basis_elems{i}, context_len) - 1) + 1j*(2 * rand(m, num_basis_elems{i}, context_len) - 1);
+                for t = 1 : context_len
                     config_out.W_init{i}(:, :, t) = config_out.W_init{i}(:, :, t) * diag(1 ./ sqrt(real(diag(config_out.W_init{i}(:, :, t)' * config_out.W_init{i}(:, :, t)))));
                 end
             end
@@ -109,8 +109,8 @@ if ~isfield(config_out, 'W_init') || isempty(config_out.W_init)  % not given any
             end
         case {'convexhullcnmf', 'convexhullccmf'}
             for i = 1 : num_sources
-                config_out.W_init{i} = rand(m, num_basis_elems{i}, num_frames);
-                for t = 1 : num_frames
+                config_out.W_init{i} = rand(m, num_basis_elems{i}, context_len);
+                for t = 1 : context_len
                     config_out.W_init{i}(:, :, t) = config_out.W_init{i}(:, :, t) * diag(1 ./ sum(config_out.W_init{i}(:, :, t))); %V * config.H_init' * diag(1 ./ sum(H, 2));
                 end
             end

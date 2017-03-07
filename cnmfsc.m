@@ -1,4 +1,4 @@
-function [W, H, cost] = cnmfsc(V, num_basis_elems, num_frames, config)
+function [W, H, cost] = cnmfsc(V, num_basis_elems, context_len, config)
 % cnmfsc Decompose a non-negative matrix V into WH using convolutive NMF
 % with sparseness constraints [1]. W is a time-varying basis tensor and H
 % is the encoding matrix that encodes the input V in terms of the basis W.
@@ -14,13 +14,14 @@ function [W, H, cost] = cnmfsc(V, num_basis_elems, num_frames, config)
 %                  time --->
 %   num_basis_elems: [positive scalar]
 %       number of basis elements (columns of W/rows of H) for 1 source.
-%   num_frames: [positive scalar]
-%       number of context frames. 1 = NMF-SC.
+%   context_len: [positive scalar]
+%       number of context frames to use when learning the factorization.
+%       1 = NMF-SC.
 %   config: [structure] (optional)
 %       structure containing configuration parameters.
 %       config.W_init: [non-negative 3D tensor] (default: random tensor)
 %           initialize 1 basis tensor with a
-%           m-by-num_basis_elems-by-num_frames tensor.
+%           m-by-num_basis_elems-by-context_len tensor.
 %       config.H_init: [non-negative matrix] (default: random matrix)
 %           initialize 1 encoding matrix with a num_basis_elems-by-n
 %           non-negative matrix.
@@ -42,7 +43,7 @@ function [W, H, cost] = cnmfsc(V, num_basis_elems, num_frames, config)
 %
 % Outputs:
 %   W: [non-negative 3D tensor]
-%       m-by-num_basis_elems-by-num_frames non-negative basis tensor.
+%       m-by-num_basis_elems-by-context_len non-negative basis tensor.
 %   H: [non-negative matrix]
 %       num_basis_elems-by-n non-negative encoding matrix.
 %   cost: [vector]
@@ -81,7 +82,7 @@ end
     
 % Initialize basis tensor
 if ~isfield(config, 'W_init') || isempty(config.W_init)
-    config.W_init = rand(m, num_basis_elems, num_frames);
+    config.W_init = rand(m, num_basis_elems, context_len);
 end
 
 % Initialize encoding matrix
@@ -102,7 +103,7 @@ elseif config.W_sparsity > 0
         config.W_sparsity = 1;
     end
     L1a = sqrt(m) - (sqrt(m) - 1) * config.W_sparsity;
-    for t = 1 : num_frames
+    for t = 1 : context_len
         for k = 1 : num_basis_elems
             W(:, k, t) = projfunc(W(:, k, t), L1a, 1, 1);
         end
@@ -143,7 +144,7 @@ if ~isfield(config, 'tolerance') || config.tolerance <= 0
 end
 
 % Initial stepsizes
-stepsizeW = ones(num_frames, 1);
+stepsizeW = ones(context_len, 1);
 stepsizeH = 1;
 
 % Calculate initial cost
@@ -156,7 +157,7 @@ for iter = 1 : config.maxiter
     if ~config.H_fixed
         negative_grad = zeros(num_basis_elems, n);
         positive_grad = zeros(num_basis_elems, n);
-        for t = 1 : num_frames
+        for t = 1 : context_len
             V_shifted = [V(:, t:n) zeros(m, t-1)];
             V_hat_shifted = [V_hat(:, t:n) zeros(m, t-1)];
             negative_grad = negative_grad + W0(:, :, t)' * V_shifted;
@@ -203,7 +204,7 @@ for iter = 1 : config.maxiter
             % Renormalize so rows of H have constant energy
             norms = sqrt(sum(H.^2, 2))';
             H = diag(1 ./ norms) * H;
-            for t = 1 : num_frames
+            for t = 1 : context_len
                 W0(:, :, t) = W0(:, :, t) * diag(norms);
             end
         end
@@ -213,7 +214,7 @@ for iter = 1 : config.maxiter
     if ~config.W_fixed
         V_hat = ReconstructFromDecomposition(W0, H);
         if config.W_sparsity > 0
-            for t = 1 : num_frames
+            for t = 1 : context_len
                 begobj = 0.5 * sum(sum((V - V_hat).^2));
 
                 % Gradient for W
@@ -253,7 +254,7 @@ for iter = 1 : config.maxiter
             end
         else
             % Update using standard CNMF multiplicative update rule
-            for t = 1 : num_frames
+            for t = 1 : context_len
                 H_shifted = [zeros(num_basis_elems, t-1) H(:, 1:n-t+1)];
                 negative_grad = V * H_shifted';
                 positive_grad = V_hat * H_shifted';
