@@ -167,14 +167,14 @@ cost = zeros(config.maxiter, 1);
 for iter = 1 : config.maxiter
     % Update convex combination matrix
     if ~config.G_fixed
-        G = G .* (((S_V_pos + S_S_neg * G * H) * H') ./ ((S_V_neg + S_S_pos * G * H) * H' + config.G_sparsity));
+        G = G .* (((S_V_pos + S_S_neg * G * H) * H') ./ max((S_V_neg + S_S_pos * G * H) * H' + config.G_sparsity, eps));
         G = G * diag(1 ./ sum(G, 1));
     end
     W = S * G;
 
     % Update encoding matrix
     if ~config.H_fixed
-        H = H .* ((S_V_pos + S_S_neg * G * H) ./ (S_V_neg + S_S_pos * G * H));
+        H = H .* ((S_V_pos + S_S_neg * G * H) ./ max(S_V_neg + S_S_pos * G * H + config.H_sparsity, eps));
     end
     
     % Calculate cost for this iteration

@@ -248,7 +248,7 @@ for iter = 1 : config.maxiter
 %                 stepsizeG(t) = 1.2 * stepsizeG(t);
 %                 G(:, :, t) = Gnew;
 %             else
-                G(:, :, t) = G0(:, :, t) .* (((S_V_pos + S_S_neg * F) * H_shifted') ./ ((S_V_neg + S_S_pos * F) * H_shifted' + config.G_sparsity));
+                G(:, :, t) = G0(:, :, t) .* (((S_V_pos + S_S_neg * F) * H_shifted') ./ max((S_V_neg + S_S_pos * F) * H_shifted' + config.G_sparsity, eps));
                 norms(:, t) = sum(G(:, :, t), 1)';
                 G(:, :, t) = G(:, :, t) * diag(1 ./ sum(G(:, :, t), 1));
 %             end
@@ -308,7 +308,7 @@ for iter = 1 : config.maxiter
 %             stepsizeH = 1.2 * stepsizeH;
 %             H = Hnew;
 %         else
-            H = H .* (negative_grad ./ (positive_grad + config.H_sparsity));
+            H = H .* (negative_grad ./ max(positive_grad + config.H_sparsity, eps));
 %         end
     end
 
