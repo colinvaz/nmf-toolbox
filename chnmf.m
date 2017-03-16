@@ -34,6 +34,10 @@ function [W, H, S, G, cost] = chnmf(V, num_basis_elems, config)
 %           equations.
 %       config.G_sparsity: [non-negative scalar] (default: 0)
 %           sparsity level for the convex combination matrix.
+%       config.pct_eigval_energy: [scalar in (0, 1]] (default: 0.95)
+%           use eigenvectors corresponding to eigenvalues that account for
+%           a given percentage of variance in the data for doing
+%           projections to find the convex hull of the data.
 %       config.maxiter: [positive scalar] (default: 100)
 %           maximum number of update iterations.
 %       config.tolerance: [positive scalar] (default: 1e-3)
@@ -71,6 +75,12 @@ end
 
 [m, n] = size(V);
 
+% Set percentage of eigenvalue energy to keep when doing projections for
+% calculating convex hull of data
+if ~isfield(config, 'pct_eigval_energy') || config.pct_eigval_energy < 0 || config.pct_eigval_energy > 1
+    config.pct_eigval_energy = 0.95;
+end
+
 % Initialize convex hull points
 if ~isfield(config, 'S_init') || isempty(config.S_init)
     % If V is 1D, then convexhull is just max and min points
@@ -78,14 +88,13 @@ if ~isfield(config, 'S_init') || isempty(config.S_init)
         config.S_init = [min(V) max(V)];
     else
         data_cov = cov(V');
-        if num_basis_elems >= m
-            [eigenvecs, ~] = eig(data_cov);
-        else
-            [eigenvecs, ~] = eigs(data_cov, num_basis_elems);
-        end
+        [eigenvecs, eigenvals] = eig(data_cov);
+        eigenvals = diag(eigenvals(end:-1:1, end:-1:1));  % order eigenvalues from largest to smallest
+        eigenvecs = eigenvecs(:, end:-1:1);  % reorder corresponding eigenvectors
+        num_eigvals_keep = min(find(cumsum(eigenvals.^2) / sum(eigenvals' * eigenvals) > config.pct_eigval_energy));
         config.S_init = [];
-        for e1 = 1 : min(num_basis_elems, m)-1
-            for e2 = e1+1 : min(num_basis_elems, m)
+        for e1 = 1 : num_eigvals_keep-1
+            for e2 = e1+1 : num_eigvals_keep
                 projected_data = V' * [eigenvecs(:, e1) eigenvecs(:, e2)];
                 convexhull_idx = convhull(projected_data);
                 config.S_init = [config.S_init V(:, convexhull_idx)];
