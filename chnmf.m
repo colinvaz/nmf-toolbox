@@ -92,6 +92,7 @@ if ~isfield(config, 'S_init') || isempty(config.S_init)
         eigenvals = diag(eigenvals(end:-1:1, end:-1:1));  % order eigenvalues from largest to smallest
         eigenvecs = eigenvecs(:, end:-1:1);  % reorder corresponding eigenvectors
         num_eigvals_keep = min(find(cumsum(eigenvals.^2) / sum(eigenvals' * eigenvals) > config.pct_eigval_energy));
+        num_eigvals_keep = max(num_eigvals_keep, 2);  % keep at least the first 2 eigenvalues
         config.S_init = [];
         for e1 = 1 : num_eigvals_keep-1
             for e2 = e1+1 : num_eigvals_keep
