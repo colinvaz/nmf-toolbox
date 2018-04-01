@@ -55,7 +55,7 @@ if nargin < 3
 	config = struct;
 end
 
-config = ValidateParameters('seminmf', config, V, num_basis_elems);
+config = ValidateParameters(V, num_basis_elems, config);
 
 W = config.W_init;
 H = config.H_init;
@@ -92,3 +92,53 @@ end
 % w_length = sqrt(sum(W.^2, 1));
 % W = W * diag(1 ./ w_length);  % normalize columns to unit L2 norm
 % H = diag(w_length) * H;
+
+end  % function seminmf
+
+
+function config_out = ValidateParameters(V, num_basis_elems, config_in)
+% ValdidateParameters private function
+% Check parameters supplied by the user and fill in default values for
+% unsupplied parameters.
+
+config_out = config_in;
+
+[data_dim, num_samples] = size(V);
+
+% Initialize encoding matrix
+if ~isfield(config_out, 'H_init') || isempty(config_out.H_init)  % not given any inital encoding matrices. Fill these in.
+    % TODO: check if this works for multiple dictionaries/activation matrices
+    cluster_idx = kmeans(V.', num_basis_elems);
+    config_out.H_init = zeros(num_basis_elems, num_samples);
+    for sample_count = 1 : num_samples
+        config_out.H_init(cluster_idx(sample_count), sample_count) = 1;
+    end
+    config_out.H_init = config_out.H_init + 0.2;
+end
+
+% Initialize basis matrix
+if ~isfield(config_out, 'W_init') || isempty(config_out.W_init)  % not given any inital basis matrices. Fill these in.
+    config_out.W_init = 2*rand(data_dim, num_basis_elems) - 1;
+end
+
+% Update switch for basis matrix
+if ~isfield(config_out, 'W_fixed') || isempty(config_out.W_fixed)  % not given an update switch. Fill this in.
+    config_out.W_fixed = false;
+end
+
+% Update switch for encoding matrix
+if ~isfield(config_out, 'H_fixed') || isempty(config_out.H_fixed)  % not given an update switch. Fill this in.
+    config_out.H_fixed = false;
+end
+
+% Maximum number of update iterations
+if ~isfield(config_out, 'maxiter') || config_out.maxiter <= 0
+    config_out.maxiter = 100;
+end
+
+% Maximum tolerance in cost function change per iteration
+if ~isfield(config_out, 'tolerance') || config_out.tolerance <= 0
+    config_out.tolerance = 1e-3;
+end
+
+end  % function ValidateParameters
