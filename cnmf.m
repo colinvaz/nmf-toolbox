@@ -128,14 +128,10 @@ if ~iscell(num_basis_elems)
     num_basis_elems = {num_basis_elems};
 end
 num_sources = length(num_basis_elems);
-[config, is_W_cell, is_H_cell] = ValidateParameters('cnmf', config, V, num_basis_elems, context_len);
+[config, is_W_cell, is_H_cell] = ValidateParameters(V, num_basis_elems, context_len, config);
 
 if (strcmp(config.divergence, 'ab_divergence') || strcmp(config.divergence, 'ab')) && config.alpha == 0 && config.beta == 0
     error('alpha = 0 and beta = 0 is not supported at this time.');
-end
-
-if ~isfield(config, 'divergence')
-    config.divergence = 'euclidean';
 end
 
 switch config.divergence
@@ -158,16 +154,14 @@ end
 
 W = config.W_init;
 H = config.H_init;
-for i = 1 : num_sources
+for source_count = 1 : num_sources
 %     for t = 1 : context_len
-%         W{i}(:, :, t) = W{i}(:, :, t) * diag(1 ./ sqrt(sum(W{i}(:, :, t).^2, 1)));
+%         W{source_count}(:, :, t) = W{source_count}(:, :, t) * diag(1 ./ sqrt(sum(W{source_count}(:, :, t).^2, 1)));
 %     end
-    for k = 1 : num_basis_elems{i}
-        w_norm = norm(squeeze(W{i}(:, k, :)), 'fro') / context_len;
-        W{i}(:, k, :) = W{i}(:, k, :) / w_norm;
-        H{i}(k, :) = w_norm * H{i}(k, :);
-%         W_curr = permute(W{i}(:, k, :), [1 3 2]);
-%         W{i}(:, k, :) = permute(diag(1 ./ sqrt(sum(W_curr.^2, 2))) * W_curr, [1 3 2]);
+    for k = 1 : num_basis_elems{source_count}
+        w_norm = norm(squeeze(W{source_count}(:, k, :)), 'fro') / context_len;
+        W{source_count}(:, k, :) = W{source_count}(:, k, :) / w_norm;
+        H{source_count}(k, :) = w_norm * H{source_count}(k, :);
     end
 end
 
@@ -180,29 +174,28 @@ cost = zeros(config.maxiter, 1);
 
 for iter = 1 : config.maxiter
     % Update basis matrices
-    for i = 1 : num_sources
-        if ~config.W_fixed{i}
+    for source_count = 1 : num_sources
+        if ~config.W_fixed{source_count}
             if use_dual
                 for t = 1 : context_len
-                    H_shifted = [zeros(num_basis_elems{i}, t-1) H{i}(:, 1:n-t+1)];
-                    gradient_neg = ((V.^(config.alpha - 1) .* V_hat.^config.beta) * H_shifted' + W{i}(:, :, t) * diag(diag(H_shifted * V'.^(config.alpha + config.beta - 1) * W{i}(:, :, t)))).^(1 / config.beta);
-                    gradient_pos = (V.^(config.alpha + config.beta - 1) * H_shifted' + W{i}(:, :, t) * diag(diag(H_shifted * (V.^(config.alpha - 1) .* V_hat.^config.beta)' * W{i}(:, :, t)))).^(1 / config.beta);
-                    W{i}(:, :, t) = W{i}(:, :, t) .* (gradient_neg ./ max(gradient_pos + config.W_sparsity{i}, eps));
+                    H_shifted = [zeros(num_basis_elems{source_count}, t-1) H{source_count}(:, 1:n-t+1)];
+                    gradient_neg = ((V.^(config.alpha - 1) .* V_hat.^config.beta) * H_shifted' + W{source_count}(:, :, t) * diag(diag(H_shifted * V'.^(config.alpha + config.beta - 1) * W{source_count}(:, :, t)))).^(1 / config.beta);
+                    gradient_pos = (V.^(config.alpha + config.beta - 1) * H_shifted' + W{source_count}(:, :, t) * diag(diag(H_shifted * (V.^(config.alpha - 1) .* V_hat.^config.beta)' * W{source_count}(:, :, t)))).^(1 / config.beta);
+                    W{source_count}(:, :, t) = W{source_count}(:, :, t) .* (gradient_neg ./ max(gradient_pos + config.W_sparsity{source_count}, eps));
                 end
             else
                 for t = 1 : context_len
-                    H_shifted = [zeros(num_basis_elems{i}, t-1) H{i}(:, 1:n-t+1)];
-                    gradient_neg = ((V.^config.alpha .* V_hat.^(config.beta - 1)) * H_shifted' + W{i}(:, :, t) * diag(diag(H_shifted * V_hat'.^(config.alpha + config.beta - 1) * W{i}(:, :, t)))).^(1 / config.alpha);
-                    gradient_pos = (V_hat.^(config.alpha + config.beta - 1) * H_shifted' + W{i}(:, :, t) * diag(diag(H_shifted * (V.^config.alpha .* V_hat.^(config.beta - 1))' * W{i}(:, :, t)))).^(1 / config.alpha);
-                    W{i}(:, :, t) = W{i}(:, :, t) .* (gradient_neg ./ max(gradient_pos + config.W_sparsity{i}, eps));
+                    H_shifted = [zeros(num_basis_elems{source_count}, t-1) H{source_count}(:, 1:n-t+1)];
+%                     gradient_neg = ((V.^config.alpha .* V_hat.^(config.beta - 1)) * H_shifted').^(1 / config.alpha);
+%                     gradient_pos = (V_hat.^(config.alpha + config.beta - 1) * H_shifted').^(1 / config.alpha);
+                    gradient_neg = ((V.^config.alpha .* V_hat.^(config.beta - 1)) * H_shifted' + W{source_count}(:, :, t) * diag(diag(H_shifted * V_hat'.^(config.alpha + config.beta - 1) * W{source_count}(:, :, t)))).^(1 / config.alpha);
+                    gradient_pos = (V_hat.^(config.alpha + config.beta - 1) * H_shifted' + W{source_count}(:, :, t) * diag(diag(H_shifted * (V.^config.alpha .* V_hat.^(config.beta - 1))' * W{source_count}(:, :, t)))).^(1 / config.alpha);
+                    W{source_count}(:, :, t) = W{source_count}(:, :, t) .* (gradient_neg ./ max(gradient_pos + config.W_sparsity{source_count}, eps));
                 end
             end
-            for k = 1 : num_basis_elems{i}
-                w_norm = norm(squeeze(W{i}(:, k, :)), 'fro') / context_len;
-                W{i}(:, k, :) = W{i}(:, k, :) / w_norm;
-                H{i}(k, :) = w_norm * H{i}(k, :);
-%                 W_curr = permute(W{i}(:, k, :), [1 3 2]);
-%                 W{i}(:, k, :) = permute(diag(1 ./ sqrt(sum(W_curr.^2, 2))) * W_curr, [1 3 2]);
+            for k = 1 : num_basis_elems{source_count}
+                w_norm = norm(squeeze(W{source_count}(:, k, :)), 'fro') / context_len;
+                W{source_count}(:, k, :) = W{source_count}(:, k, :) / w_norm;
             end
         end
     end
@@ -211,8 +204,8 @@ for iter = 1 : config.maxiter
     V_hat = ReconstructFromDecomposition(W_all, H_all);
     
     % Update encoding matrices
-    for i = 1 : num_sources
-        if ~config.H_fixed{i}
+    for source_count = 1 : num_sources
+        if ~config.H_fixed{source_count}
             if use_dual
                 V_neg = V.^(config.alpha - 1) .* V_hat.^config.beta;
                 V_pos = V.^(config.alpha + config.beta - 1);
@@ -220,8 +213,8 @@ for iter = 1 : config.maxiter
                 V_neg = V.^config.alpha .* V_hat.^(config.beta - 1);
                 V_pos = V_hat.^(config.alpha + config.beta - 1);
             end
-            gradient_neg = zeros(num_basis_elems{i}, n);
-            gradient_pos = zeros(num_basis_elems{i}, n);
+            gradient_neg = zeros(num_basis_elems{source_count}, n);
+            gradient_pos = zeros(num_basis_elems{source_count}, n);
             for t = 1 : context_len
                 V_neg_shifted = [V_neg(:, t:n) zeros(m, t-1)];
                 if strcmp(config.divergence, 'kl_divergence') || strcmp(config.divergence, 'kl')  % TODO: check if this needs to be done for other divergences
@@ -229,13 +222,13 @@ for iter = 1 : config.maxiter
                 else
                     V_pos_shifted = [V_pos(:, t:n) zeros(m, t-1)];
                 end
-                gradient_neg = gradient_neg + W{i}(:, :, t)' * V_neg_shifted;
-                gradient_pos = gradient_pos + W{i}(:, :, t)' * V_pos_shifted;
+                gradient_neg = gradient_neg + W{source_count}(:, :, t)' * V_neg_shifted;
+                gradient_pos = gradient_pos + W{source_count}(:, :, t)' * V_pos_shifted;
             end
             if use_dual
-                H{i} = H{i} .* (gradient_neg.^(1 / config.beta) ./ max(gradient_pos.^(1 / config.beta) + config.H_sparsity{i}, eps));
+                H{source_count} = H{source_count} .* (gradient_neg.^(1 / config.beta) ./ max(gradient_pos.^(1 / config.beta) + config.H_sparsity{source_count}, eps));
             else
-                H{i} = H{i} .* (gradient_neg.^(1 / config.alpha) ./ max(gradient_pos.^(1 / config.alpha) + config.H_sparsity{i}, eps));
+                H{source_count} = H{source_count} .* (gradient_neg.^(1 / config.alpha) ./ max(gradient_pos.^(1 / config.alpha) + config.H_sparsity{source_count}, eps));
             end
         end
     end
@@ -253,8 +246,8 @@ for iter = 1 : config.maxiter
         case {'ab_divergence', 'ab'}
             cost(iter) = (-1 / (config.alpha * config.beta)) * sum(sum(V.^config.alpha .* V_hat.^config.beta - (config.alpha * V.^(config.alpha + config.beta) + config.beta *  V_hat.^(config.alpha + config.beta) + config.beta) / (config.alpha + config.beta)));
     end
-    for i = 1 : num_sources
-        cost(iter) = cost(iter) + config.H_sparsity{i} * sum(sum(abs(H{i})));
+    for source_count = 1 : num_sources
+        cost(iter) = cost(iter) + config.W_sparsity{source_count} * sum(sum(abs(W{source_count}))) + config.H_sparsity{source_count} * sum(sum(abs(H{source_count})));
     end
     
     % Stop iterations if change in cost function less than the tolerance
@@ -272,3 +265,185 @@ end
 if ~is_H_cell
     H = H{1};
 end
+
+end  % function cnmf
+
+function [config_out, is_W_cell, is_H_cell] = ValidateParameters(V, num_basis_elems, context_len, config_in)
+% ValdidateParameters private function
+% Check parameters supplied by the user and fill in default values for
+% unsupplied parameters.
+
+config_out = config_in;
+
+[data_dim, num_samples] = size(V);
+
+num_sources = length(num_basis_elems);
+
+% Initialize default divergence for the cost function
+if ~isfield(config_out, 'divergence')
+    config_out.divergence = 'euclidean';
+end
+
+% Default alpha parameter for Alpha-Beta divergence
+if ~isfield(config_out, 'alpha')
+    config_out.alpha = 1;
+elseif ~strcmp(config_out.divergence, 'ab_divergence') && ~strcmp(config_out.divergence, 'ab')
+    config_out.alpha = 1;
+end
+
+% Default beta parameter for Alpha-Beta divergence
+if ~isfield(config_out, 'beta')
+    config_out.beta = 1;
+elseif ~strcmp(config_out.divergence, 'ab_divergence') && ~strcmp(config_out.divergence, 'ab')
+    config_out.beta = 1;
+end
+
+% Initialize encoding matrices
+if ~isfield(config_out, 'H_init') || isempty(config_out.H_init)  % not given any inital encoding matrices. Fill these in.
+    if num_sources == 1
+        is_H_cell = false;
+    else
+        is_H_cell = true;
+    end
+    config_out.H_init = cell(num_sources, 1);
+    for source_count = 1 : num_sources
+        config_out.H_init{source_count} = max(rand(num_basis_elems{source_count}, num_samples), eps);
+    end
+elseif iscell(config_out.H_init) && length(config_out.H_init) ~= num_sources  % given an incorrect number of initial encoding matrices
+    error(['Requested ', num2str(num_sources), ' sources. Given ', num2str(length(config_out.H_init)), ' initial encoding matrices.']);
+elseif ~iscell(config_out.H_init)  % given a matrix
+    is_H_cell = false;
+    config_out.H_init = {config_out.H_init};
+else  % organize encoding matrices as {H_1; H_2; ...; H_num_bases}
+    is_H_cell = true;
+    config_out.H_init = config_out.H_init(:);
+end
+
+% Initialize basis matrices
+if ~isfield(config_out, 'W_init') || isempty(config_out.W_init)  % not given any inital basis matrices. Fill these in.
+    if num_sources == 1
+        is_W_cell = false;
+    else
+        is_W_cell = true;
+    end
+    config_out.W_init = cell(1, num_sources);
+    for source_count = 1 : num_sources
+        config_out.W_init{source_count} = rand(data_dim, num_basis_elems{source_count}, context_len);
+        for k = 1 : num_basis_elems{source_count}
+            w_norm = norm(squeeze(config_out.W_init{source_count}(:, k, :)), 'fro') / context_len;
+            config_out.W_init{source_count}(:, k, :) = config_out.W_init{source_count}(:, k, :) / w_norm;
+        end
+    end
+elseif iscell(config_out.W_init) && length(config_out.W_init) ~= num_sources  % given an incorrect number of initial basis matrices
+    error(['Requested ', num2str(num_sources), ' sources. Given ', num2str(length(config_out.W_init)), ' initial basis matrices.']);
+elseif ~iscell(config_out.W_init)  % given a matrix
+    is_W_cell = false;
+    config_out.W_init = {config_out.W_init};
+else  % organize basis matrices as {W_1 W_2 ... W_num_bases}
+    is_W_cell = true;
+    config_out.W_init = config_out.W_init(:)';
+end
+
+% Sparsity levels for basis matrices
+if ~isfield(config_out, 'W_sparsity') || isempty(config_out.W_sparsity)  % not given a sparsity level. Fill this in.
+    config_out.W_sparsity = cell(num_sources, 1);
+    for source_count = 1 : num_sources
+        config_out.W_sparsity{source_count} = 0;
+    end
+elseif iscell(config_out.W_sparsity) && length(config_out.W_sparsity) > 1 && length(config_out.W_sparsity) ~= num_sources  % given an incorrect number of sparsity levels
+    error(['Requested ', num2str(num_sources), ' sources. Given ', num2str(length(config_out.W_sparsity)), ' sparsity levels.']);
+elseif ~iscell(config_out.W_sparsity)  || length(config_out.W_sparsity) == 1  % extend one sparsity level to all basis matrices
+    if iscell(config_out.W_sparsity)
+        temp = max(config_out.W_sparsity{1}, 0);
+    else
+        temp = max(config_out.W_sparsity, 0);
+    end
+    config_out.W_sparsity = cell(num_sources, 1);
+    for source_count = 1 : num_sources
+        config_out.W_sparsity{source_count} = temp;
+    end
+    clear temp;
+else  % make sure all given sparsity levels are non-negative
+    for source_count = 1 : num_sources
+        config_out.W_sparsity{source_count} = max(config_out.W_sparsity{source_count}, 0);
+    end
+end
+
+% Sparsity levels for encoding matrices
+if ~isfield(config_out, 'H_sparsity') || isempty(config_out.H_sparsity)  % not given a sparsity level. Fill this in.
+    config_out.H_sparsity = cell(num_sources, 1);
+    for source_count = 1 : num_sources
+        config_out.H_sparsity{source_count} = 0;
+    end
+elseif iscell(config_out.H_sparsity) && length(config_out.H_sparsity) > 1 && length(config_out.H_sparsity) ~= num_sources  % given an incorrect number of sparsity levels
+    error(['Requested ', num2str(num_sources), ' sources. Given ', num2str(length(config_out.H_sparsity)), ' sparsity levels.']);
+elseif ~iscell(config_out.H_sparsity)  || length(config_out.H_sparsity) == 1  % extend one sparsity level to all encoding matrices
+    if iscell(config_out.H_sparsity)
+        temp = max(config_out.H_sparsity{1}, 0);
+    else
+        temp = max(config_out.H_sparsity, 0);
+    end
+    config_out.H_sparsity = cell(num_sources, 1);
+    for source_count = 1 : num_sources
+        config_out.H_sparsity{source_count} = temp;
+    end
+    clear temp;
+else  % make sure all given sparsity levels are non-negative
+    for source_count = 1 : num_sources
+        config_out.H_sparsity{source_count} = max(config_out.H_sparsity{source_count}, 0);
+    end
+end
+
+% Update switches for basis matrices
+if ~isfield(config_out, 'W_fixed') || isempty(config_out.W_fixed)  % not given an update switch. Fill this in.
+    config_out.W_fixed = cell(num_sources, 1);
+    for source_count = 1 : num_sources
+        config_out.W_fixed{source_count} = false;
+    end
+elseif iscell(config_out.W_fixed) && length(config_out.W_fixed) > 1 && length(config_out.W_fixed) ~= num_sources  % given an incorrect number of update switches
+    error(['Requested ', num2str(num_sources), ' sources. Given ', num2str(length(config_out.W_fixed)), ' update switches.']);
+elseif ~iscell(config_out.W_fixed)  || length(config_out.W_fixed) == 1  % extend one update switch level to all basis matrices
+    if iscell(config_out.W_fixed)
+        temp = config_out.W_fixed{1};
+    else
+        temp = config_out.W_fixed;
+    end
+    config_out.W_fixed = cell(num_sources, 1);
+    for source_count = 1 : num_sources
+        config_out.W_fixed{source_count} = temp;
+    end
+    clear temp;
+end
+
+% Update switches for encoding matrices
+if ~isfield(config_out, 'H_fixed') || isempty(config_out.H_fixed)  % not given an update switch. Fill this in.
+    config_out.H_fixed = cell(num_sources, 1);
+    for source_count = 1 : num_sources
+        config_out.H_fixed{source_count} = false;
+    end
+elseif iscell(config_out.H_fixed) && length(config_out.H_fixed) > 1 && length(config_out.H_fixed) ~= num_sources  % given an incorrect number of update switches
+    error(['Requested ', num2str(num_sources), ' sources. Given ', num2str(length(config_out.H_fixed)), ' update switches.']);
+elseif ~iscell(config_out.H_fixed)  || length(config_out.H_fixed) == 1  % extend one update switch level to all encoding matrices
+    if iscell(config_out.H_fixed)
+        temp = config_out.H_fixed{1};
+    else
+        temp = config_out.H_fixed;
+    end
+    config_out.H_fixed = cell(num_sources, 1);
+    for source_count = 1 : num_sources
+        config_out.H_fixed{source_count} = temp;
+    end
+    clear temp;
+end
+
+% Maximum number of update iterations
+if ~isfield(config_out, 'maxiter') || config_out.maxiter <= 0
+    config_out.maxiter = 100;
+end
+
+% Maximum tolerance in cost function change per iteration
+if ~isfield(config_out, 'tolerance') || config_out.tolerance <= 0
+    config_out.tolerance = 1e-3;
+end
+
+end  % function ValidateParameters

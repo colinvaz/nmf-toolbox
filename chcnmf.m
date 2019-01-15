@@ -98,6 +98,8 @@ if ~isfield(config, 'S_init') || isempty(config.S_init)
     % If V is 1D, then convexhull is just max and min points
     if m == 1
         config.S_init = [min(V) max(V)];
+    elseif n <= 2  % If only have at most 2 points, then let convexhull be V
+        config.S_init = V;
     else
         data_cov = cov(V');
         [eigenvecs, eigenvals] = eig(data_cov);
@@ -119,8 +121,55 @@ end
 S = config.S_init;
 num_points = size(S, 2);
 
+% Check if given initial basis (W \approx S * G)
+if ~isfield(config, 'W_init') || isempty(config.W_init)
+    given_W_init = false;
+else
+    given_W_init = true;
+    W_init = config.W_init;
+end
+
+% Update switch for the basis
+if ~isfield(config, 'W_fixed')
+    config.W_fixed = false;
+elseif config.W_fixed
+    config.G_fixed = true;  % make G fixed if W is fixed because W \approx S * G
+end
+
 % Initialize convex combination tensor
-if ~isfield(config, 'G_init') || isempty(config.G_init)
+if given_W_init
+    % Find best G_init such that W_init \approx S * G_init
+    config.G_init = rand(num_points, num_basis_elems, context_len);
+%     for t = 1 : context_len
+%         cvx_begin quiet
+%             variable G_t(num_points, num_basis_elems)
+%             minimize(norm(W_init(:, :, t) - S * G_t, 'fro'))
+%             subject to
+%                 G_t >= eps
+%                 sum(G_t, 1) == 1
+%         cvx_end
+%         config.G_init(:, :, t) = G_t;
+%     end
+    
+    for t = 1 : context_len
+        config.G_init(:, :, t) = config.G_init(:, :, t) * diag(1 ./ sum(config.G_init(:, :, t), 1));
+        S_W_pos = 0.5 * (abs(S' * W_init(:, :, t)) + (S' * W_init(:, :, t)));
+        S_W_neg = 0.5 * (abs(S' * W_init(:, :, t)) - (S' * W_init(:, :, t)));
+        S_S_pos = 0.5 * (abs(S' * S) + (S' * S));
+        S_S_neg = 0.5 * (abs(S' * S) - (S' * S));
+        prev_cost = inf;
+        for inner_iter = 1 : 100
+            config.G_init(:, :, t) = config.G_init(:, :, t) .* ((S_W_pos + S_S_neg*config.G_init(:, :, t)) ./ (S_W_neg + S_S_pos*config.G_init(:, :, t)));
+            config.G_init(:, :, t) = config.G_init(:, :, t) * diag(1 ./ sum(config.G_init(:, :, t), 1));
+            curr_cost = 0.5 * norm(W_init(:, :, t) - S * config.G_init(:, :, t), 'fro')^2;
+            if curr_cost <= prev_cost && prev_cost - curr_cost <= 1e-5
+                break;
+            end
+            prev_cost = curr_cost;
+        end
+    end
+    
+elseif ~isfield(config, 'G_init') || isempty(config.G_init)
     config.G_init = rand(num_points, num_basis_elems, context_len);
 %     for t = 2 : context_len
 %         config.G_init(:, :, t) = abs(config.G_init(:, :, t-1) + 0.1 * (2*rand(num_points, num_basis_elems) - 1));
@@ -192,145 +241,201 @@ end
 
 G0 = G;
 
-S_V_pos = 0.5 * (abs(S' * V) + (S' * V));
-S_V_neg = 0.5 * (abs(S' * V) - (S' * V));
-S_S_pos = 0.5 * (abs(S' * S) + (S' * S));
-S_S_neg = 0.5 * (abs(S' * S) - (S' * S));
-identity_mat = speye(n);
-W = zeros(m, num_basis_elems, context_len);
-for t = 1 : context_len
-    W(:, :, t) = S * G(:, :, t);
-end
-
-cost = zeros(config.maxiter+1, 1);
-V_hat = ReconstructFromDecomposition(W, H);
-cost(1) = 0.5 * sum(sum((V - V_hat).^2));
-
-stepsizeG = ones(context_len, 1);
-stepsizeH = 1;
-
-for iter = 1 : config.maxiter
-    F = ReconstructFromDecomposition(G0, H);
-        
-    % Update convex combination tensor
-    if ~config.G_fixed
-        norms = zeros(num_basis_elems, context_len);
-        for t = 1 : context_len
-            H_shifted = [zeros(num_basis_elems, t-1) H(:, 1:n-t+1)];
-            
-            % Hoyer's sparsity constraint
-%             if config.G_sparsity > 0
-%                 % Gradient for H
-%                 dG = (S_V_neg + S_S_pos * F) * H_shifted' - (S_V_pos + S_S_neg * F) * H_shifted';
-%                 W_current = W;
-%                 V_hat = ReconstructFromDecomposition(W_current, H);
-%                 begobj = 0.5 * sum(sum((V - V_hat).^2));
+% if given_W_init
+%     cost = zeros(config.maxiter+1, 1);
+%     V_hat = ReconstructFromDecomposition(W, H);
+%     cost(1) = 0.5 * sum(sum((V - V_hat).^2)) + config.H_sparsity * sum(sum(H));
+%     
+%     V_pos = 0.5 * (abs(V) + V);
+%     V_neg = 0.5 * (abs(V) - V);
+%     
+%     for iter = 1 : config.maxiter
+% %         if ~config.W_fixed
+% %             W_pos = 0.5 * (abs(W) + W);
+% %             W_neg = 0.5 * (abs(W) - W);
+% %             V_hat_pos = ReconstructFromDecomposition(W_pos, H);
+% %             V_hat_neg = ReconstructFromDecomposition(W_neg, H);
+% %             for t = 1 : context_len
+% %                 H_shifted = [zeros(num_basis_elems, t-1) H(:, 1:n-t+1)];
+% %                 
+% %                 W(:, :, t) = W(:, :, t) .* (((V_pos + V_hat_neg) * H_shifted') ./ max((V_neg + V_hat_pos) * H_shifted', eps));
+% %             end
+% %         end
+%         
+% %         if ~config.H_fixed
+%             grad_neg = zeros(num_basis_elems, n);
+%             grad_pos = zeros(num_basis_elems, n);
 % 
-%                 % Make sure we decrease the objective!
-%                 while 1
-%                     % Take step in direction of negative gradient, and project
-%                     Gnew = G0(:, :, t) - stepsizeG(t) * dG;
-%                     for k = 1 : num_basis_elems
-%                         Gnew(:, k) = projfunc(Gnew(:, k), 1, L2s, 1);
+%             for t1 = 1 : context_len
+%                 V_shifted = [V(:, t1:n) zeros(m, t1-1)];
+%                 W_V_pos = 0.5 * (abs(W(:, :, t1)' * V_shifted) + (W(:, :, t1)' * V_shifted));
+%                 W_V_neg = 0.5 * (abs(W(:, :, t1)' * V_shifted) - (W(:, :, t1)' * V_shifted));
+%                 W_V_hat_neg = zeros(num_basis_elems, n);
+%                 W_V_hat_pos = zeros(num_basis_elems, n);
+% 
+%                 for t2 = 1 : context_len
+%                     if t2 >= t1
+%                         H_shifted = [zeros(num_basis_elems, t2-t1) H(:, 1:n-(t2-t1))];
+%                     else
+%                         H_shifted = [H(:, (num_basis_elems-t2)+1:n) zeros(k, t1-t2)];
 %                     end
-% 
-%                     W_current(:, :, t) = S * Gnew;
-% 
-%                     % Calculate new objective
-%                     V_hat = ReconstructFromDecomposition(W_current, H);
-%                     newobj = 0.5 * sum(sum((V - V_hat).^2));
-% 
-%                     % If the objective decreased, we can continue...
-%                     if newobj <= begobj
-%                         break;
-%                     end
-% 
-%                     % ...else decrease stepsize and try again
-%                     stepsizeG(t) = stepsizeG(t) / 2;
-%                     if stepsizeG(t) < 1e-200
-%                         fprintf('Algorithm converged.\n');
-%                         cost = cost(1 : iter);  % trim
-%                         return; 
-%                     end
+%                     W_W_pos = 0.5 * (abs(W(:, :, t1)' * W(:, :, t2)) + (W(:, :, t1)' * W(:, :, t2)));
+%                     W_W_neg = 0.5 * (abs(W(:, :, t1)' * W(:, :, t2)) - (W(:, :, t1)' * W(:, :, t2)));
+%                     W_V_hat_neg = W_V_hat_neg + W_W_neg * H_shifted;
+%                     W_V_hat_pos = W_V_hat_pos + W_W_pos * H_shifted;
 %                 end
-% 
-%                 % Slightly increase the stepsize
-%                 stepsizeG(t) = 1.2 * stepsizeG(t);
-%                 G(:, :, t) = Gnew;
-%             else
-                G(:, :, t) = G0(:, :, t) .* (((S_V_pos + S_S_neg * F) * H_shifted') ./ max((S_V_neg + S_S_pos * F) * H_shifted' + config.G_sparsity, eps));
-                norms(:, t) = sum(G(:, :, t), 1)';
-                G(:, :, t) = G(:, :, t) * diag(1 ./ sum(G(:, :, t), 1));
+%                 grad_neg = grad_neg + W_V_pos + W_V_hat_neg;
+%                 grad_pos = grad_pos + W_V_neg + W_V_hat_pos;
 %             end
-            F = max(F + (G(:, :, t) - G0(:, :, t)) * H_shifted, 0);
-            W(:, :, t) = S * G(:, :, t);
-        end
-%         H = context_len * diag(1 ./ sum((1 ./ norms), 2)) * H;
+%             H = H .* (grad_neg ./ max(grad_pos + config.H_sparsity, eps));
+% %         end
+% 
+%         V_hat = ReconstructFromDecomposition(W, H);
+%         cost(iter+1) = 0.5 * sum(sum((V - V_hat).^2)) + config.H_sparsity * sum(sum(H));
+%     end
+% else
+    S_V_pos = 0.5 * (abs(S' * V) + (S' * V));
+    S_V_neg = 0.5 * (abs(S' * V) - (S' * V));
+    S_S_pos = 0.5 * (abs(S' * S) + (S' * S));
+    S_S_neg = 0.5 * (abs(S' * S) - (S' * S));
+    identity_mat = speye(n);
+    W = zeros(m, num_basis_elems, context_len);
+    for t = 1 : context_len
+        W(:, :, t) = S * G(:, :, t);
     end
 
-    % Update encoding matrix
-    if ~config.H_fixed
-        F = ReconstructFromDecomposition(G, H);
-        negative_grad = zeros(num_basis_elems, n);
-        positive_grad = zeros(num_basis_elems, n);
-        for t = 1 : context_len
-            identity_shifted = [identity_mat(:, t:n) zeros(n, t-1)];
-            F_shifted = [F(:, t:n) zeros(num_points, t-1)];
-            negative_grad = negative_grad + G(:, :, t)' * (S_V_pos * identity_shifted + S_S_neg * F_shifted);
-            positive_grad = positive_grad + G(:, :, t)' * (S_V_neg * identity_shifted + S_S_pos * F_shifted);
-        end
-        % Hoyer's sparsity constraint
-%         if config.H_sparsity > 0
-%             % Gradient for H
-%             dH = positive_grad - negative_grad;
-%             begobj = cost(iter);
-% 
-%             % Make sure we decrease the objective!
-%             while 1
-%                 % Take step in direction of negative gradient, and project
-%                 Hnew = H - stepsizeH * dH;
-%                 for k = 1 : num_basis_elems
-%                     H_norm = norm(Hnew(k, :));
-%                     Hnew(k, :) = Hnew(k, :) / H_norm;
-%                     Hnew(k, :) = (projfunc(Hnew(k, :)', L1s, 1, 1))';
-%                     Hnew(k, :) = Hnew(k, :) * H_norm;
-%                 end
-% 
-%                 % Calculate new objective
-%                 V_hat = ReconstructFromDecomposition(W, Hnew);
-%                 newobj = 0.5 * sum(sum((V - V_hat).^2));
-% 
-%                 % If the objective decreased, we can continue...
-%                 if newobj <= begobj
-%                     break;
-%                 end
-% 
-%                 % ...else decrease stepsize and try again
-%                 stepsizeH = stepsizeH / 2;
-%                 if stepsizeH < 1e-200
-%                     fprintf('Algorithm converged.\n');
-%                     cost = cost(1 : iter);  % trim
-%                     return; 
-%                 end
-%             end
-% 
-%             % Slightly increase the stepsize
-%             stepsizeH = 1.2 * stepsizeH;
-%             H = Hnew;
-%         else
-            H = H .* (negative_grad ./ max(positive_grad + config.H_sparsity, eps));
-%         end
-    end
-
-    % Calculate cost for this iteration
+    cost = zeros(config.maxiter+1, 1);
     V_hat = ReconstructFromDecomposition(W, H);
-    cost(iter+1) = 0.5 * sum(sum((V - V_hat).^2));
-    
-    % Stop iterations if change in cost function less than the tolerance
-    if iter > 1 && cost(iter+1) < cost(iter) && cost(iter) - cost(iter+1) < config.tolerance
-        cost = cost(1 : iter+1);  % trim vector
-        break;
+    cost(1) = 0.5 * sum(sum((V - V_hat).^2)) + config.H_sparsity * sum(sum(H));
+
+    stepsizeG = ones(context_len, 1);
+    stepsizeH = 1;
+
+    for iter = 1 : config.maxiter
+        F = ReconstructFromDecomposition(G0, H);
+
+        % Update convex combination tensor
+        if ~config.G_fixed
+            norms = zeros(num_basis_elems, context_len);
+            for t = 1 : context_len
+                H_shifted = [zeros(num_basis_elems, t-1) H(:, 1:n-t+1)];
+
+                % Hoyer's sparsity constraint
+    %             if config.G_sparsity > 0
+    %                 % Gradient for H
+    %                 dG = (S_V_neg + S_S_pos * F) * H_shifted' - (S_V_pos + S_S_neg * F) * H_shifted';
+    %                 W_current = W;
+    %                 V_hat = ReconstructFromDecomposition(W_current, H);
+    %                 begobj = 0.5 * sum(sum((V - V_hat).^2));
+    % 
+    %                 % Make sure we decrease the objective!
+    %                 while 1
+    %                     % Take step in direction of negative gradient, and project
+    %                     Gnew = G0(:, :, t) - stepsizeG(t) * dG;
+    %                     for k = 1 : num_basis_elems
+    %                         Gnew(:, k) = projfunc(Gnew(:, k), 1, L2s, 1);
+    %                     end
+    % 
+    %                     W_current(:, :, t) = S * Gnew;
+    % 
+    %                     % Calculate new objective
+    %                     V_hat = ReconstructFromDecomposition(W_current, H);
+    %                     newobj = 0.5 * sum(sum((V - V_hat).^2));
+    % 
+    %                     % If the objective decreased, we can continue...
+    %                     if newobj <= begobj
+    %                         break;
+    %                     end
+    % 
+    %                     % ...else decrease stepsize and try again
+    %                     stepsizeG(t) = stepsizeG(t) / 2;
+    %                     if stepsizeG(t) < 1e-200
+    %                         fprintf('Algorithm converged.\n');
+    %                         cost = cost(1 : iter);  % trim
+    %                         return; 
+    %                     end
+    %                 end
+    % 
+    %                 % Slightly increase the stepsize
+    %                 stepsizeG(t) = 1.2 * stepsizeG(t);
+    %                 G(:, :, t) = Gnew;
+    %             else
+                    G(:, :, t) = G0(:, :, t) .* (((S_V_pos + S_S_neg * F) * H_shifted') ./ max((S_V_neg + S_S_pos * F) * H_shifted' + config.G_sparsity, eps));
+                    norms(:, t) = sum(G(:, :, t), 1)';
+                    G(:, :, t) = G(:, :, t) * diag(1 ./ sum(G(:, :, t), 1));
+    %             end
+                F = max(F + (G(:, :, t) - G0(:, :, t)) * H_shifted, 0);
+                W(:, :, t) = S * G(:, :, t);
+            end
+    %         H = context_len * diag(1 ./ sum((1 ./ norms), 2)) * H;
+        end
+
+        % Update encoding matrix
+        if ~config.H_fixed
+            F = ReconstructFromDecomposition(G, H);
+            negative_grad = zeros(num_basis_elems, n);
+            positive_grad = zeros(num_basis_elems, n);
+            for t = 1 : context_len
+                identity_shifted = [identity_mat(:, t:n) zeros(n, t-1)];
+                F_shifted = [F(:, t:n) zeros(num_points, t-1)];
+                negative_grad = negative_grad + G(:, :, t)' * (S_V_pos * identity_shifted + S_S_neg * F_shifted);
+                positive_grad = positive_grad + G(:, :, t)' * (S_V_neg * identity_shifted + S_S_pos * F_shifted);
+            end
+            % Hoyer's sparsity constraint
+    %         if config.H_sparsity > 0
+    %             % Gradient for H
+    %             dH = positive_grad - negative_grad;
+    %             begobj = cost(iter);
+    % 
+    %             % Make sure we decrease the objective!
+    %             while 1
+    %                 % Take step in direction of negative gradient, and project
+    %                 Hnew = H - stepsizeH * dH;
+    %                 for k = 1 : num_basis_elems
+    %                     H_norm = norm(Hnew(k, :));
+    %                     Hnew(k, :) = Hnew(k, :) / H_norm;
+    %                     Hnew(k, :) = (projfunc(Hnew(k, :)', L1s, 1, 1))';
+    %                     Hnew(k, :) = Hnew(k, :) * H_norm;
+    %                 end
+    % 
+    %                 % Calculate new objective
+    %                 V_hat = ReconstructFromDecomposition(W, Hnew);
+    %                 newobj = 0.5 * sum(sum((V - V_hat).^2));
+    % 
+    %                 % If the objective decreased, we can continue...
+    %                 if newobj <= begobj
+    %                     break;
+    %                 end
+    % 
+    %                 % ...else decrease stepsize and try again
+    %                 stepsizeH = stepsizeH / 2;
+    %                 if stepsizeH < 1e-200
+    %                     fprintf('Algorithm converged.\n');
+    %                     cost = cost(1 : iter);  % trim
+    %                     return; 
+    %                 end
+    %             end
+    % 
+    %             % Slightly increase the stepsize
+    %             stepsizeH = 1.2 * stepsizeH;
+    %             H = Hnew;
+    %         else
+                H = H .* (negative_grad ./ max(positive_grad + config.H_sparsity, eps));
+    %         end
+        end
+
+        % Calculate cost for this iteration
+        V_hat = ReconstructFromDecomposition(W, H);
+        cost(iter+1) = 0.5 * sum(sum((V - V_hat).^2)) + config.H_sparsity * sum(sum(H));
+
+        % Stop iterations if change in cost function less than the tolerance
+        if iter > 1 && cost(iter+1) < cost(iter) && cost(iter) - cost(iter+1) < config.tolerance
+            cost = cost(1 : iter+1);  % trim vector
+            break;
+        end
+
+        G0 = G;
     end
-    
-    G0 = G;
-end
+% end
+
+end  % function
